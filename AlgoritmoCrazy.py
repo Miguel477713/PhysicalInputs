@@ -5,7 +5,13 @@ import time
 import numpy as np
 from collections import deque
 
+from Network import GetIsoUtcNow, QueueLocationPayload
+
 # --- CONFIGURACIÓN DE RED Y HARDWARE ---
+DEVICE_ID = "raspberrypi"
+RADAR_BEACON_UID = "radar"
+LOCATION_ACCURACY = 0.0
+
 PORT_CANDIDATES = ["/dev/serial0", "/dev/ttyAMA0", "/dev/ttyUSB0"]
 BAUD = 115200
 RECONNECT_DELAY_S = 2
@@ -130,6 +136,35 @@ def serial_reader():
             if ser: ser.close()
         time.sleep(RECONNECT_DELAY_S)
 
+def BuildLocationPayload(x, y, sectionStatus):
+    timestamp = GetIsoUtcNow()
+
+    return {
+        "device_id": DEVICE_ID,
+        "universalTimeStamp": timestamp,
+        "sourceTimeStamp": timestamp,
+        "beacon": {
+            "uid": RADAR_BEACON_UID,
+            "status": sectionStatus
+        },
+        "coords": {
+            "x": float(round(x, 1)),
+            "y": float(round(y, 1)),
+            "accuracy": LOCATION_ACCURACY
+        },
+        "raw_metrics": {
+            "radar": {
+                "rssi": 0,
+                "dist": 0.0
+            }
+        },
+        "events": {
+            "near_door": False,
+            "low_battery": False
+        }
+    }
+
+
 def position_calculator():
     kf = KalmanIndoor()
     print("Iniciando cálculo WKNN + Kalman...")
@@ -147,6 +182,9 @@ def position_calculator():
         if raw_pos_data is not None:
             x_filt, y_filt = kf.update(raw_pos_data)
             print(f"[{zona}] Coord Hibrida: ({round(x_filt, 1)}m, {round(y_filt, 1)}m) | Nodos: {len(current_rssi)}")
+
+            payload = BuildLocationPayload(x_filt, y_filt, zona)
+            QueueLocationPayload(payload)
         else:
             kf.update(None)
 
