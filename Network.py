@@ -4,7 +4,7 @@ import queue
 from datetime import datetime, timezone
 from urllib import request
 
-remoteUrl = "http://your-remote-endpoint/api/sensors"
+remoteUrl = "https://server-api.calmgrass-d765df7a.westus2.azurecontainerapps.io/api/sensors"
 
 eventQueue = queue.Queue()
 
@@ -21,7 +21,19 @@ def SendToRemote(payload):
         method="POST"
     )
 
-    request.urlopen(req, timeout=5)
+    try:
+        response = request.urlopen(req, timeout=5)
+
+        if response.status == 200:
+            print("✅ Success (200)")
+        else:
+            print(f"⚠️ Unexpected status: {response.status}")
+
+    except error.HTTPError as e:
+        print(f"❌ HTTP Error: {e.code}")
+
+    except error.URLError as e:
+        print(f"❌ Connection Error: {e.reason}")
 
 # Worker thread (only place where network happens)
 def Worker(numberOfAttempts=3):
