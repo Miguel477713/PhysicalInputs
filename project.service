@@ -1,0 +1,19 @@
+[Unit]
+Description=Detection service
+Requires=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/migue/DistributedSystems
+ExecStart=/usr/bin/python3 /home/migue/DistributedSystems/Main.py
+Restart=always
+RestartSec=2
+User=migue
+
+#for debugging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+#Enable on restart at multi-user.target
+sudo systemctl daemon-reload
+sudo systemctl enable --now project.service
+
+#Process status
+sudo systemctl status project.service
+sudo journalctl -u project.service -f
+journalctl -u project.service -n 50 --no-pager
+
+#Stop services
+sudo systemctl stop project.service
+
+#Start services
+sudo systemctl start project.service
