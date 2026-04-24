@@ -41,6 +41,9 @@ def Triggered(channel):
     else:
         print(f"{sensorInfo[channel]["sensorType"]}{sensorInfo[channel]["sensorId"]}: Relay closed")
 
+    if sensorInfo[channel]["sensorType"] == "proximity":
+        state = not bool(state)
+
     payload = BuildSensorPayload(channel, state)
      # NON-BLOCKING: just enqueue
     QueueSensorPayload(payload)
