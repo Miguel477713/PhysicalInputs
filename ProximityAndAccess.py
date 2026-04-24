@@ -1,9 +1,6 @@
 import RPi.GPIO as GPIO
-import time
-import json
-import threading
-import queue
-from Network import *
+
+from Network import GetIsoUtcNow, QueueSensorPayload
 
 GPIO.setmode(GPIO.BCM)
 
@@ -45,9 +42,9 @@ def Triggered(channel):
         print(f"{sensorInfo[channel]["sensorType"]}{sensorInfo[channel]["sensorId"]}: Relay closed")
 
     payload = BuildSensorPayload(channel, state)
+     # NON-BLOCKING: just enqueue
+    QueueSensorPayload(payload)
 
-    # NON-BLOCKING: just enqueue
-    eventQueue.put(payload)
 
 # Setup GPIO
 def SetGPIO():

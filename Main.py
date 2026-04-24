@@ -1,51 +1,60 @@
+import threading
+import time
+
+import RPi.GPIO as GPIO
+
 from AlgoritmoCrazy import serial_reader, position_calculator
-from ProximityAndAccess import * 
+from Network import NetworkWorker, QueueHeartbeat, StopNetworkWorker, outboundQueue
+from ProximityAndAccess import SetGPIO, Triggered, sensorInfo
+
+
+def RegisterGPIOCallbacks():
+    for pin in sensorInfo.keys():
+        GPIO.add_event_detect(pin, GPIO.BOTH, callback=Triggered, bouncetime=50)
+
+
+def QueueInitialSensorStates():
+    for pin in sensorInfo.keys():
+        Triggered(pin)
+
+
+def HeartbeatLoop(serviceName, intervalSeconds):
+    while True:
+        QueueHeartbeat(serviceName)
+        time.sleep(intervalSeconds)
+
+
+def StartThread(target, name, args=()):
+    thread = threading.Thread(target=target, name=name, args=args, daemon=True)
+    thread.start()
+    return thread
+
 
 def Main():
     print("Program started")
 
-    # Start NET worker threads
-    workerThread = threading.Thread(target=Worker, daemon=True, args=(3, 0))
-    locWorkerThread = threading.Thread(target=LocationWorker, daemon=True, args=(3,))
-    locWorkerThread.start()
-    workerThread.start()
+    networkThread = StartThread(NetworkWorker, "network-worker", args=(3,))
 
-    #timedWorkerThread1 = threading.Thread(target=TimedWorker, daemon=True, args=(3, 60, 'heartbeatProximity'))
-    #timedWorkerThread1.start()
+    StartThread(HeartbeatLoop, "heartbeat-proximity", args=("proximity", 60))
+    StartThread(HeartbeatLoop, "heartbeat-sensors", args=("sensors", 60))
 
-    #timedWorkerThread2 = threading.Thread(target=TimedWorker, daemon=True, args=(3, 60, 'heartbeatSensors'))
-    #timedWorkerThread2.start()
-    
-    #sensors------------------------------------------------------------
     SetGPIO()
+    QueueInitialSensorStates()
+    RegisterGPIOCallbacks()
 
-    # Initial states
-    for pin, info in sensorInfo.items():
-        Triggered(pin)
-
-    # Event detection
-    for pin, info in sensorInfo.items():
-        GPIO.add_event_detect(pin, GPIO.BOTH, callback=Triggered, bouncetime=50)
-
-
-    #radar------------------------------------------------------------
-    # Hilo 1: Lector
-    t1 = threading.Thread(target=serial_reader, daemon=True)
-    t1.start()
-    
-    # Hilo 2: Calculador (Loop Principal)
-    t2 = threading.Thread(target=position_calculator, daemon=True)
-    t2.start()
+    StartThread(serial_reader, "serial-reader")
+    StartThread(position_calculator, "position-calculator")
 
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
         print("Shutting down...")
-        eventQueue.put(None)  # signal worker to stop
-        eventQueue.join() #wait until no queue empty
-        workerThread.join() #blocks until all queued tasks are marked done
+        StopNetworkWorker()
+        outboundQueue.join()
+        networkThread.join()
         GPIO.cleanup()
+
 
 if __name__ == "__main__":
     Main()
