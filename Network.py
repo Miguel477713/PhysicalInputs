@@ -1,13 +1,20 @@
 import json
 import queue
+import threading
 import time
 from datetime import datetime, timezone
 from urllib import request, error
 
 remoteUrl = "https://server-api.calmgrass-d765df7a.westus2.azurecontainerapps.io/api/"
 
-# One queue for every outbound network message: sensors, proximity, location, heartbeat.
-outboundQueue = queue.Queue()
+# Three outbound queues. They are all thread-safe because Python queue.Queue
+# already handles locking internally.
+gpioQueue = queue.Queue()
+heartbeatQueue = queue.Queue()
+radarQueue = queue.Queue()
+
+stopRequested = threading.Event()
+queueRotationIndex = 0
 
 
 def GetIsoUtcNow():
@@ -28,27 +35,77 @@ def BuildQueueItem(endpoint, payload):
     }
 
 
-def QueueOutbound(endpoint, payload):
-    outboundQueue.put(BuildQueueItem(endpoint, payload))
+def QueueGpioOutbound(endpoint, payload):
+    gpioQueue.put(BuildQueueItem(endpoint, payload))
+
+
+def QueueHeartbeatOutbound(endpoint, payload):
+    heartbeatQueue.put(BuildQueueItem(endpoint, payload))
+
+
+def QueueRadarOutbound(endpoint, payload):
+    radarQueue.put(BuildQueueItem(endpoint, payload))
 
 
 def QueueSensorPayload(payload):
     if payload.get("sensorType") in ["door", "window"]:
-        QueueOutbound("sensors", payload)
+        QueueGpioOutbound("sensors", payload)
     else:
-        QueueOutbound("proximity", payload)
+        QueueGpioOutbound("proximity", payload)
 
 
 def QueueLocationPayload(payload):
-    QueueOutbound("location", payload)
+    QueueRadarOutbound("location", payload)
 
 
 def QueueHeartbeat(serviceName):
-    QueueOutbound(f"{serviceName}/heartbeat", BuildHeartbeatPayload(serviceName))
+    QueueHeartbeatOutbound(f"{serviceName}/heartbeat", BuildHeartbeatPayload(serviceName))
 
 
 def StopNetworkWorker():
-    outboundQueue.put(None)
+    stopRequested.set()
+
+
+def OutboundQueuesAreEmpty():
+    return gpioQueue.empty() and heartbeatQueue.empty() and radarQueue.empty()
+
+
+def JoinOutboundQueues():
+    gpioQueue.join()
+    heartbeatQueue.join()
+    radarQueue.join()
+
+
+def GetNextQueueItem(timeoutSeconds=0.25):
+    """
+    Fair round-robin selection across the three queues.
+
+    This avoids the old single-FIFO problem where many radar messages could sit
+    in front of a GPIO message. It also avoids strict priority: GPIO does not
+    always jump ahead forever; each non-empty queue gets turns.
+    """
+    global queueRotationIndex
+
+    queues = [
+        ("gpio", gpioQueue),
+        ("heartbeat", heartbeatQueue),
+        ("radar", radarQueue),
+    ]
+
+    # First: try all queues without blocking (fair round-robin)
+    for offset in range(len(queues)):
+        index = (queueRotationIndex + offset) % len(queues)
+        queueName, selectedQueue = queues[index]
+        try:
+            queueItem = selectedQueue.get_nowait()
+            queueRotationIndex = (index + 1) % len(queues)
+            return queueName, selectedQueue, queueItem
+        except queue.Empty:
+            pass
+
+    # Second: nothing available, then sleep briefly
+    time.sleep(timeoutSeconds)
+    return None, None, None
 
 
 def SendToRemote(endpoint, payload):
@@ -86,14 +143,19 @@ def SendToRemote(endpoint, payload):
 # Worker thread: the only place where network requests happen.
 def NetworkWorker(numberOfAttempts=3):
     while True:
-        queueItem = outboundQueue.get()
+        if stopRequested.is_set() and OutboundQueuesAreEmpty():
+            break
+
+        queueName, selectedQueue, queueItem = GetNextQueueItem()
+
+        if queueItem is None:
+            continue
 
         try:
-            if queueItem is None:
-                break
-
             endpoint = queueItem["endpoint"]
             payload = queueItem["payload"]
+
+            print(f"Sending {queueName} item to {endpoint}")
 
             for attempt in range(numberOfAttempts):
                 try:
@@ -106,4 +168,4 @@ def NetworkWorker(numberOfAttempts=3):
                     else:
                         time.sleep(1)
         finally:
-            outboundQueue.task_done()
+            selectedQueue.task_done()

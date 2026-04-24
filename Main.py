@@ -4,7 +4,7 @@ import time
 import RPi.GPIO as GPIO
 
 from AlgoritmoCrazy import serial_reader, position_calculator
-from Network import NetworkWorker, QueueHeartbeat, StopNetworkWorker, outboundQueue
+from Network import NetworkWorker, QueueHeartbeat, StopNetworkWorker, JoinOutboundQueues
 from ProximityAndAccess import SetGPIO, Triggered, sensorInfo
 
 
@@ -51,7 +51,7 @@ def Main():
     except KeyboardInterrupt:
         print("Shutting down...")
         StopNetworkWorker()
-        outboundQueue.join()
+        JoinOutboundQueues()
         networkThread.join()
         GPIO.cleanup()
 
